@@ -10,6 +10,7 @@ from trello import TrelloClient
 
 from Trello.TList import TList
 
+
 env_path = Path('.') / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -41,20 +42,6 @@ tlists = []
 for i in range(len(order_board.list_lists())):
     curr = order_board.list_lists()[i]
     tlists.append(TList(curr.id, curr.name, curr.closed, curr.list_cards()))
-
-
-@slack_event_adapter.on("message")
-def message(payload):
-    event = payload.get("event", {})
-    channel_id = event.get("channel")
-    user_id = event.get("user")
-    text = event.get("text")
-
-    if BOT_ID != user_id:
-        if user_id in message_counts:
-            message_counts[user_id] += 1
-        else:
-            message_counts[user_id] = 1
 
 
 @app.route('/ping', methods=['POST'])
@@ -268,24 +255,7 @@ def create_list():
         if type(list_name) == tuple:
             list_name = ''.join(list_name)
         order_board.add_list(list_name)
-        payload = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "Success",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*'{list_name}'* has just been added to your board.\nCheck it out "
-                                f"<{order_board.url}|here> :nerd_face:!"
-                    }
-                }
-            ]
+        payload = _build_payload(list_name=list_name, caller=0)
         client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
     else:
         client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name")
@@ -301,26 +271,9 @@ def close_list():
         list_name = data.get('text')
         if type(list_name) == tuple:
             list_name = ''.join(list_name)
-        list_to_close = [list for list in order_board.list_lists() if list.name == list_name][0]
+        list_to_close = [tlist for tlist in order_board.list_lists() if tlist.name == list_name][0]
         list_to_close.close()
-        payload = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "Success",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*'{list_name}'* has just been removed from your board.\nCheck it out "
-                                f"<{order_board.url}|here> :nerd_face:!"
-                    }
-                }
-            ]
+        payload = _build_payload(list_name=list_name, caller=1)
         client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
     else:
         client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name")
@@ -338,23 +291,7 @@ def add_card():
             list_name, card_name = input_info.split('~')
             tlist = [tlist for tlist in order_board.list_lists() if tlist.name == list_name][0]
             tlist.add_card(card_name)
-            payload = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "Success",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*'{card_name}'* has just been added to *'{list_name}'* :nerd_face:"
-                    }
-                }
-            ]
+            payload = _build_payload(list_name=list_name, caller=2, card_name=card_name)
             client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
         else:
             client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name and a card name")
@@ -375,23 +312,7 @@ def delete_card():
             tlist = [tlist for tlist in order_board.list_lists() if tlist.name == list_name][0]
             card = [card for card in tlist.list_cards() if card.name == card_name][0]
             card.delete()
-            payload = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "Success",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*'{card_name}'* has just been deleted from *'{list_name}'* :nerd_face:"
-                    }
-                }
-            ]
+            payload = _build_payload(list_name=list_name, caller=3, card_name=card_name)
             client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
         else:
             client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name and a card name")
@@ -399,6 +320,48 @@ def delete_card():
         client.chat_postMessage(channel=data.get('channel_id'), text="Please enter both a list and card name")
 
     return Response(), 200
+
+
+def _build_payload(list_name: str, caller: int, card_name: str = None):
+    """
+    Builds the payload for the message based off of the list name and caller.
+
+    Values for <caller>:
+        0 - Create list
+        1 - Close list
+        2 - Add card
+        3 - Delete card
+    """
+    message = ''
+    if caller == 0:
+        message = f"*{list_name}* has been created and added to your board." \
+                  f"Check it out <{order_board.url}|here>!"
+    elif caller == 1:
+        message = f"*{list_name}* has been closed and archived."
+    elif caller == 2:
+        message = f"*{card_name}* has been created and added to *{list_name}*." \
+                  f"Check it out <{order_board.url}|here>!"
+    elif caller == 3:
+        message = f"*{card_name}* has been deleted from *{list_name}*."
+
+    payload = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": "Success",
+                "emoji": True
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": message
+            }
+        }
+    ]
+    return payload
 
 
 if __name__ == '__main__':
