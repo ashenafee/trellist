@@ -36,7 +36,7 @@ trello_client = TrelloClient(
 )
 
 all_boards = trello_client.list_boards()
-order_board = all_boards[0]
+order_board = all_boards[2]
 tlists = []
 for i in range(len(order_board.list_lists())):
     curr = order_board.list_lists()[i]
@@ -55,16 +55,6 @@ def message(payload):
             message_counts[user_id] += 1
         else:
             message_counts[user_id] = 1
-
-
-@app.route('/message-count', methods=['POST'])
-def message_count():
-    data = request.form
-    user_id = data.get('user_id')
-    channel_id = data.get('channel_id')
-    message_count = message_counts.get(user_id, 0)
-    client.chat_postMessage(channel=channel_id, text=f"Message: {message_count}")
-    return Response(), 200
 
 
 @app.route('/ping', methods=['POST'])
@@ -220,12 +210,12 @@ def _dropdown_options(i, info_str, list_names, open_lists, options):
 def list_information():
     data = json.loads(request.form['payload'])
     value_code = list(data.get('state').get('values').keys())[0]
-    list_name = data.get('state')\
-                    .get('values')\
-                    .get(value_code)\
-                    .get('static_select-action')\
-                    .get('selected_option')\
-                    .get('text').get('text')
+    list_name = data.get('state') \
+        .get('values') \
+        .get(value_code) \
+        .get('static_select-action') \
+        .get('selected_option') \
+        .get('text').get('text')
 
     # Get tlist with name
     tlist = [tlist for tlist in tlists if tlist.name == list_name][0]
@@ -265,6 +255,148 @@ def list_information():
     ]
     print(data.get('channel'))
     client.chat_postMessage(channel=data.get('channel').get('id'), blocks=payload)
+
+    return Response(), 200
+
+
+@app.route('/create-list', methods=['POST'])
+def create_list():
+    data = request.form
+
+    if data.get('text') != '':
+        list_name = data.get('text')
+        if type(list_name) == tuple:
+            list_name = ''.join(list_name)
+        order_board.add_list(list_name)
+        payload = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Success",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*'{list_name}'* has just been added to your board.\nCheck it out "
+                                f"<{order_board.url}|here> :nerd_face:!"
+                    }
+                }
+            ]
+        client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
+    else:
+        client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name")
+
+    return Response(), 200
+
+
+@app.route('/close-list', methods=['POST'])
+def close_list():
+    data = request.form
+
+    if data.get('text') != '':
+        list_name = data.get('text')
+        if type(list_name) == tuple:
+            list_name = ''.join(list_name)
+        list_to_close = [list for list in order_board.list_lists() if list.name == list_name][0]
+        list_to_close.close()
+        payload = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Success",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*'{list_name}'* has just been removed from your board.\nCheck it out "
+                                f"<{order_board.url}|here> :nerd_face:!"
+                    }
+                }
+            ]
+        client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
+    else:
+        client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name")
+
+    return Response(), 200
+
+
+@app.route('/add-card', methods=['POST'])
+def add_card():
+    data = request.form
+
+    if data.get('text') != '':
+        input_info = data.get('text')
+        if '~' in input_info:
+            list_name, card_name = input_info.split('~')
+            tlist = [tlist for tlist in order_board.list_lists() if tlist.name == list_name][0]
+            tlist.add_card(card_name)
+            payload = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Success",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*'{card_name}'* has just been added to *'{list_name}'* :nerd_face:"
+                    }
+                }
+            ]
+            client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
+        else:
+            client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name and a card name")
+    else:
+        client.chat_postMessage(channel=data.get('channel_id'), text="Please enter both a list and card name")
+
+    return Response(), 200
+
+
+@app.route('/delete-card', methods=['POST'])
+def delete_card():
+    data = request.form
+
+    if data.get('text') != '':
+        input_info = data.get('text')
+        if '~' in input_info:
+            list_name, card_name = input_info.split('~')
+            tlist = [tlist for tlist in order_board.list_lists() if tlist.name == list_name][0]
+            card = [card for card in tlist.list_cards() if card.name == card_name][0]
+            card.delete()
+            payload = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Success",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*'{card_name}'* has just been deleted from *'{list_name}'* :nerd_face:"
+                    }
+                }
+            ]
+            client.chat_postMessage(channel=data.get('channel_id'), blocks=payload)
+        else:
+            client.chat_postMessage(channel=data.get('channel_id'), text="Please enter a list name and a card name")
+    else:
+        client.chat_postMessage(channel=data.get('channel_id'), text="Please enter both a list and card name")
 
     return Response(), 200
 
